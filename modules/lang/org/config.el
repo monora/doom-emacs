@@ -761,9 +761,12 @@ between the two."
   ;; `doom/forward-to-last-non-comment-or-eol', but with more org awareness.
   (setq org-special-ctrl-a/e t)
 
-  (setq org-M-RET-may-split-line nil
-        ;; insert new headings after current subtree rather than inside it
-        org-insert-heading-respect-content t)
+  ;; Why do we change the behavior of org-meta-return?
+  ;; It is not possible to return to the default behavior!
+  ;;
+  ;; (setq org-M-RET-may-split-line nil
+  ;;       ;; insert new headings after current subtree rather than inside it
+  ;;       org-insert-heading-respect-content t)
 
   (add-hook! 'org-tab-first-hook
              #'+org-yas-expand-maybe-h
