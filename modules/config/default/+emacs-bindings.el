@@ -480,7 +480,9 @@
       ;;; Text scaling
       "M-+" #'doom/reset-font-size
       "M-=" #'doom/increase-font-size
-      "M--" #'doom/decrease-font-size
+      ;; Collides with build in negative argument
+      ;; Why not use `text-scale-decrease'?
+      ;; "M--" #'doom/decrease-font-size
 
       ;;; search
       (:when (featurep! :completion ivy)
