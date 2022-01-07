@@ -2,12 +2,12 @@
 ;;; tools/biblio/packages.el
 
 (when (featurep! :completion ivy)
-  (package! bibtex-completion :pin "bb47f355b0da8518aa3fb516019120c14c8747c9")
-  (package! ivy-bibtex :pin "bb47f355b0da8518aa3fb516019120c14c8747c9"))
+  (package! bibtex-completion :pin "aa775340ba691d2322948bfdc6a88158568a1399")
+  (package! ivy-bibtex :pin "aa775340ba691d2322948bfdc6a88158568a1399"))
 (when (featurep! :completion helm)
-  (package! bibtex-completion :pin "bb47f355b0da8518aa3fb516019120c14c8747c9")
-  (package! helm-bibtex :pin "bb47f355b0da8518aa3fb516019120c14c8747c9"))
+  (package! bibtex-completion :pin "aa775340ba691d2322948bfdc6a88158568a1399")
+  (package! helm-bibtex :pin "aa775340ba691d2322948bfdc6a88158568a1399"))
 (when (featurep! :completion vertico)
-  (package! citar :pin "41ec5d4d5d625f7d784b4de20d14b7bceaf1730c"))
+  (package! citar :pin "51b30f2e4091a41243ae62cfbac53e7a579f3168"))
 
-(package! citeproc :pin "c8ff95862823cdff067e8cc9bb7f5ef537e8f1d9")
+(package! citeproc :pin "538fed794c29acf81efee8a2674268bd3d7cc471")
