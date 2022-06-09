@@ -57,12 +57,40 @@ symbol and CDR is the value to set it to when `doom-debug-mode' is activated.")
     ;; potentially define one of `doom-debug-variables'), in case some of them
     ;; aren't defined when `doom-debug-mode' is first loaded.
     (cond (enabled
+           (advice-add #'message :before #'doom--timestamped-message-a)
            (add-variable-watcher 'doom-debug-variables #'doom--watch-debug-vars-h)
            (add-hook 'after-load-functions #'doom--watch-debug-vars-h))
           (t
+           (advice-remove #'message #'doom--timestamped-message-a)
            (remove-variable-watcher 'doom-debug-variables #'doom--watch-debug-vars-h)
            (remove-hook 'after-load-functions #'doom--watch-debug-vars-h)))
     (message "Debug mode %s" (if enabled "on" "off"))))
+
+
+;;
+;;; Time-stamped *Message* logs
+
+(defun doom--timestamped-message-a (format-string &rest args)
+  "Advice to run before `message' that prepends a timestamp to each message.
+
+Activate this advice with:
+(advice-add 'message :before 'doom--timestamped-message-a)"
+  (when (and (stringp format-string)
+             message-log-max
+             (not (string-equal format-string "%s%s")))
+    (with-current-buffer "*Messages*"
+      (let ((timestamp (format-time-string "[%F %T] " (current-time)))
+            (deactivate-mark nil))
+        (with-silent-modifications
+          (goto-char (point-max))
+          (if (not (bolp))
+              (newline))
+          (insert timestamp))))
+    (let ((window (get-buffer-window "*Messages*")))
+      (when (and window (not (equal (selected-window) window)))
+        (with-current-buffer "*Messages*"
+          (goto-char (point-max))
+          (set-window-point window (point-max)))))))
 
 
 ;;
@@ -182,13 +210,15 @@ ready to be pasted in a bug report on github."
                         collect
                         (let* ((flags (doom-module-get cat (cdr key) :flags))
                                (path  (doom-module-get cat (cdr key) :path))
-                               (module (append (cond ((null path)
-                                                      (list '&nopath))
-                                                     ((file-in-directory-p path doom-private-dir)
-                                                      (list '&user)))
-                                               (if flags
-                                                   `(,(cdr key) ,@flags)
-                                                 (list (cdr key))))))
+                               (module
+                                (append
+                                 (cond ((null path)
+                                        (list '&nopath))
+                                       ((not (file-in-directory-p path doom-modules-dir))
+                                        (list '&user)))
+                                 (if flags
+                                     `(,(cdr key) ,@flags)
+                                   (list (cdr key))))))
                           (if (= (length module) 1)
                               (car module)
                             module)))
@@ -222,130 +252,50 @@ ready to be pasted in a bug report on github."
 
 ;;;###autoload
 (defun doom/version ()
-  "Display the current version and ocmit of Doom & Emacs."
+  "Display the running version of Doom core, module sources, and Emacs."
   (interactive)
+  (print! "%-13s v%-15s %s"
+          "GNU Emacs"
+          emacs-version
+          emacs-repository-version)
   (let ((default-directory doom-emacs-dir))
-    (print! "Doom emacs\tv%-15s %s"
+    (print! "%-13s v%-15s %s"
+            "Doom core"
             doom-version
             (or (cdr (doom-call-process "git" "log" "-1" "--format=%D %h %ci"))
                 "n/a")))
-  (let ((default-directory doom-core-dir))
-    (print! "Doom core\tv%-15s %s"
-            doom-core-version
+  ;; NOTE This is a placeholder. Our modules will be moved to its own repo
+  ;;   eventually, and Doom core will later be capable of managing them like
+  ;;   package sources.
+  (let ((default-directory doom-modules-dir))
+    (print! "%-13s v%-15s %s"
+            "Doom modules"
+            doom-modules-version
             (or (cdr (doom-call-process "git" "log" "-1" "--format=%D %h %ci"))
                 "n/a"))))
 
 ;;;###autoload
-(defun doom/info (&optional raw)
+(defun doom/info ()
   "Collects some debug information about your Emacs session, formats it and
 copies it to your clipboard, ready to be pasted into bug reports!"
-  (interactive "P")
-  (let ((buffer (get-buffer-create "*doom info*"))
-        (info (doom-info)))
+  (interactive)
+  (let ((buffer (get-buffer-create "*doom info*")))
     (with-current-buffer buffer
-      (erase-buffer)
-      (if raw
-          (progn
-            (save-excursion
-              (pp info (current-buffer)))
-            (dolist (sym '(modules packages))
-              (when (re-search-forward (format "^ *\\((%s\\)" sym) nil t)
-                (goto-char (match-beginning 1))
-                (cl-destructuring-bind (beg . end)
-                    (bounds-of-thing-at-point 'sexp)
-                  (let ((sexp (prin1-to-string (sexp-at-point))))
-                    (delete-region beg end)
-                    (insert sexp))))))
-        (dolist (spec info)
-          (when (cdr spec)
+      (setq buffer-read-only t)
+      (with-silent-modifications
+        (erase-buffer)
+        (save-excursion
+          (dolist (spec (cl-remove-if-not #'cdr (doom-info)))
             (insert! "%-11s  %s\n"
                      ((car spec)
                       (if (listp (cdr spec))
                           (mapconcat (lambda (x) (format "%s" x))
                                      (cdr spec) " ")
                         (cdr spec)))))))
-      (if (not doom-interactive-p)
-          (print! (buffer-string))
-        (with-current-buffer (pop-to-buffer buffer)
-          (setq buffer-read-only t)
-          (goto-char (point-min))
-          (kill-new (buffer-string))
-          (when (y-or-n-p "Your doom-info was copied to the clipboard.\n\nOpen pastebin.com?")
-            (browse-url "https://pastebin.com")))))))
-
-
-;;;###autoload
-(defun doom/am-i-secure ()
-  "Test to see if your root certificates are securely configured in emacs.
-Some items are not supported by the `nsm.el' module."
-  (declare (interactive-only t))
-  (interactive)
-  (unless (string-match-p "\\_<GNUTLS\\_>" system-configuration-features)
-    (warn "gnutls support isn't built into Emacs, there may be problems"))
-  (if-let* ((bad-hosts
-             (cl-loop for bad
-                      in '("https://expired.badssl.com/"
-                           "https://wrong.host.badssl.com/"
-                           "https://self-signed.badssl.com/"
-                           "https://untrusted-root.badssl.com/"
-                           ;; "https://revoked.badssl.com/"
-                           ;; "https://pinning-test.badssl.com/"
-                           "https://sha1-intermediate.badssl.com/"
-                           "https://rc4-md5.badssl.com/"
-                           "https://rc4.badssl.com/"
-                           "https://3des.badssl.com/"
-                           "https://null.badssl.com/"
-                           "https://sha1-intermediate.badssl.com/"
-                           ;; "https://client-cert-missing.badssl.com/"
-                           "https://dh480.badssl.com/"
-                           "https://dh512.badssl.com/"
-                           "https://dh-small-subgroup.badssl.com/"
-                           "https://dh-composite.badssl.com/"
-                           "https://invalid-expected-sct.badssl.com/"
-                           ;; "https://no-sct.badssl.com/"
-                           ;; "https://mixed-script.badssl.com/"
-                           ;; "https://very.badssl.com/"
-                           "https://subdomain.preloaded-hsts.badssl.com/"
-                           "https://superfish.badssl.com/"
-                           "https://edellroot.badssl.com/"
-                           "https://dsdtestprovider.badssl.com/"
-                           "https://preact-cli.badssl.com/"
-                           "https://webpack-dev-server.badssl.com/"
-                           "https://captive-portal.badssl.com/"
-                           "https://mitm-software.badssl.com/"
-                           "https://sha1-2016.badssl.com/"
-                           "https://sha1-2017.badssl.com/")
-                      if (condition-case _e
-                             (url-retrieve-synchronously bad)
-                           (error nil))
-                      collect bad)))
-      (error "tls seems to be misconfigured (it got %s)."
-             bad-hosts)
-    (url-retrieve "https://badssl.com"
-                  (lambda (status)
-                    (if (or (not status) (plist-member status :error))
-                        (warn "Something went wrong.\n\n%s" (pp-to-string status))
-                      (message "Your trust roots are set up properly.\n\n%s" (pp-to-string status))
-                      t)))))
-
-
-;;
-;;; Reporting bugs
-
-;;;###autoload
-(defun doom/copy-buffer-contents (buffer-name)
-  "Copy the contents of BUFFER-NAME to your clipboard."
-  (interactive
-   (list (if current-prefix-arg
-             (completing-read "Select buffer: " (mapcar #'buffer-name (buffer-list)))
-           (buffer-name (current-buffer)))))
-  (let ((buffer (get-buffer buffer-name)))
-    (unless (buffer-live-p buffer)
-      (user-error "Buffer isn't live"))
-    (kill-new
-     (with-current-buffer buffer
-       (substring-no-properties (buffer-string))))
-    (message "Contents of %S were copied to the clipboard" buffer-name)))
+      (pop-to-buffer buffer)
+      (kill-new (buffer-string))
+      (when (y-or-n-p "Your doom-info was copied to the clipboard.\n\nOpen pastebin.com?")
+        (browse-url "https://pastebin.com")))))
 
 
 ;;

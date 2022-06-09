@@ -95,6 +95,10 @@
        :prefix "gz"
        :nv "d" #'evil-mc-make-and-goto-next-match
        :nv "D" #'evil-mc-make-and-goto-prev-match
+       :nv "s" #'evil-mc-skip-and-goto-next-match
+       :nv "S" #'evil-mc-skip-and-goto-prev-match
+       :nv "c" #'evil-mc-skip-and-goto-next-cursor
+       :nv "C" #'evil-mc-skip-and-goto-prev-cursor
        :nv "j" #'evil-mc-make-cursor-move-next-line
        :nv "k" #'evil-mc-make-cursor-move-prev-line
        :nv "m" #'evil-mc-make-all-cursors
@@ -362,6 +366,7 @@
        :desc "Kill other buffers"          "O"   #'doom/kill-other-buffers
        :desc "Previous buffer"             "p"   #'previous-buffer
        :desc "Revert buffer"               "r"   #'revert-buffer
+       :desc "Rename buffer"               "R"   #'rename-buffer
        :desc "Save buffer"                 "s"   #'basic-save-buffer
        :desc "Save all buffers"            "S"   #'evil-write-all
        :desc "Save buffer as root"         "u"   #'doom/sudo-save-buffer

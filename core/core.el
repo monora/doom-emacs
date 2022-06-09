@@ -24,11 +24,11 @@
   "An Emacs framework for the stubborn martian hacker."
   :link '(url-link "https://doomemacs.org"))
 
-(defconst doom-version "21.12.0-alpha"
-  "Current version of Doom Emacs.")
-
-(defconst doom-core-version "3.0.0-alpha"
+(defconst doom-version "3.0.0-dev"
   "Current version of Doom Emacs core.")
+
+(defconst doom-modules-version "22.06.0-dev"
+  "Current version of Doom Emacs.")
 
 (defvar doom-debug-p (or (getenv-internal "DEBUG") init-file-debug)
   "If non-nil, Doom will log more.
@@ -52,6 +52,13 @@ envvar will enable this at startup.")
 (defconst IS-LINUX   (eq system-type 'gnu/linux))
 (defconst IS-WINDOWS (memq system-type '(cygwin windows-nt ms-dos)))
 (defconst IS-BSD     (or IS-MAC (eq system-type 'berkeley-unix)))
+
+(when-let (realhome
+           (and IS-WINDOWS
+                (null (getenv-internal "HOME"))
+                (getenv "USERPROFILE")))
+  (setenv "HOME" realhome)
+  (setq abbreviated-home-dir nil))
 
 
 ;;
@@ -164,9 +171,10 @@ users).")
 
   (with-eval-after-load 'comp
     ;; HACK Disable native-compilation for some troublesome packages
-    (mapc (doom-partial #'add-to-list 'native-comp-deferred-compilation-deny-list)
+    (mapc (apply-partially #'add-to-list 'native-comp-deferred-compilation-deny-list)
           (let ((local-dir-re (concat "\\`" (regexp-quote doom-local-dir))))
-            (list (concat local-dir-re ".*/evil-collection-vterm\\.el\\'")
+            (list (concat local-dir-re ".*/emacs-jupyter.*\\.el\\'")
+                  (concat local-dir-re ".*/evil-collection-vterm\\.el\\'")
                   (concat local-dir-re ".*/with-editor\\.el\\'"))))))
 
 

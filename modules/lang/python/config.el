@@ -7,7 +7,7 @@
   "Command to initialize the jupyter REPL for `+python/open-jupyter-repl'.")
 
 (after! projectile
-  (pushnew! projectile-project-root-files "setup.py" "requirements.txt"))
+  (pushnew! projectile-project-root-files "pyproject.toml" "requirements.txt" "setup.py"))
 
 
 ;;
@@ -21,7 +21,7 @@
         python-indent-guess-indent-offset-verbose nil)
 
   (when (featurep! +lsp)
-    (add-hook 'python-mode-local-vars-hook #'lsp!)
+    (add-hook 'python-mode-local-vars-hook #'lsp! 'append)
     ;; Use "mspyls" in eglot if in PATH
     (when (executable-find "Microsoft.Python.LanguageServer")
       (set-eglot-client! 'python-mode '("Microsoft.Python.LanguageServer"))))
@@ -77,12 +77,6 @@
         ;; directly will work.
         (setq-local flycheck-python-pylint-executable "pylint")
         (setq-local flycheck-python-flake8-executable "flake8"))))
-
-  (define-key python-mode-map (kbd "DEL") nil) ; interferes with smartparens
-  (sp-local-pair 'python-mode "'" nil
-                 :unless '(sp-point-before-word-p
-                           sp-point-after-word-p
-                           sp-point-before-same-p))
 
   ;; Affects pyenv and conda
   (when (featurep! :ui modeline)
@@ -276,7 +270,8 @@
                                 "/usr/bin/anaconda3"
                                 "/usr/local/anaconda3"
                                 "/usr/local/miniconda3"
-                                "/usr/local/Caskroom/miniconda/base")
+                                "/usr/local/Caskroom/miniconda/base"
+                                "~/.conda")
                if (file-directory-p dir)
                return (setq conda-anaconda-home (expand-file-name dir)
                             conda-env-home-directory (expand-file-name dir)))
@@ -316,6 +311,24 @@
   :after cython-mode)
 
 
+(use-package! pip-requirements
+  :defer t
+  :config
+  ;; HACK `pip-requirements-mode' performs a sudden HTTP request to
+  ;;   https://pypi.org/simple, which causes unexpected hangs (see #5998). This
+  ;;   advice defers this behavior until the first time completion is invoked.
+  ;; REVIEW More sensible behavior should be PRed upstream.
+  (defadvice! +python--init-completion-a (&rest args)
+    "Call `pip-requirements-fetch-packages' first time completion is invoked."
+    :before #'pip-requirements-complete-at-point
+    (unless pip-packages (pip-requirements-fetch-packages)))
+  (defadvice! +python--inhibit-pip-requirements-fetch-packages-a (fn &rest args)
+    "No-op `pip-requirements-fetch-packages', which can be expensive."
+    :around #'pip-requirements-mode
+    (letf! ((#'pip-requirements-fetch-packages #'ignore))
+      (apply fn args))))
+
+
 ;;
 ;;; LSP
 
@@ -332,8 +345,3 @@
   (use-package! lsp-pyright
     :when (featurep! +pyright)
     :after lsp-mode))
-
-(eval-when! (and (featurep! +pyright)
-                 (featurep! :tools lsp +eglot))
-  (after! eglot
-    (add-to-list 'eglot-server-programs '(python-mode . ("pyright-langserver" "--stdio")))))

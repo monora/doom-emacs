@@ -15,6 +15,15 @@ overrides `completion-styles' during company completion sessions.")
 
 (use-package! vertico
   :hook (doom-first-input . vertico-mode)
+  :init
+  (defadvice! +vertico-crm-indicator-a (args)
+    :filter-args #'completing-read-multiple
+    (cons (format "[CRM%s] %s"
+                  (replace-regexp-in-string
+                   "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+                   crm-separator)
+                  (car args))
+          (cdr args)))
   :config
   (setq vertico-resize nil
         vertico-count 17
@@ -29,7 +38,14 @@ overrides `completion-styles' during company completion sessions.")
   ;; cleans ~/foo/bar/// to /, and ~/foo/bar/~/ to ~/.
   (add-hook 'rfn-eshadow-update-overlay-hook #'vertico-directory-tidy)
   (add-hook 'minibuffer-setup-hook #'vertico-repeat-save)
-  (map! :map vertico-map [backspace] #'vertico-directory-delete-char))
+  (map! :map vertico-map "DEL" #'vertico-directory-delete-char)
+
+  ;; These commands are problematic and automatically show the *Completions* buffer
+  (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
+  (defadvice! +vertico--suppress-completion-help-a (fn &rest args)
+    :around #'ffap-menu-ask
+    (letf! ((#'minibuffer-completion-help #'ignore))
+      (apply fn args))))
 
 
 (use-package! orderless
@@ -47,7 +63,7 @@ orderless."
     (cond
      ;; Ensure $ works with Consult commands, which add disambiguation suffixes
      ((string-suffix-p "$" pattern)
-      `(orderless-regexp . ,(concat (substring pattern 0 -1) "[\x100000-\x10FFFD]*$")))
+      `(orderless-regexp . ,(concat (substring pattern 0 -1) "[\x200000-\x300000]*$")))
      ;; Ignore single !
      ((string= "!" pattern) `(orderless-literal . ""))
      ;; Without literal
@@ -70,7 +86,7 @@ orderless."
      +vertico-basic-remote-try-completion
      +vertico-basic-remote-all-completions
      "Use basic completion on remote files only"))
-  (setq completion-styles '(orderless)
+  (setq completion-styles '(orderless basic)
         completion-category-defaults nil
         ;; note that despite override in the name orderless can still be used in
         ;; find-file etc.
@@ -101,7 +117,6 @@ orderless."
     [remap switch-to-buffer-other-frame]  #'consult-buffer-other-frame
     [remap yank-pop]                      #'consult-yank-pop
     [remap persp-switch-to-buffer]        #'+vertico/switch-workspace-buffer)
-  (advice-add #'completing-read-multiple :override #'consult-completing-read-multiple)
   (advice-add #'multi-occur :override #'consult-multi-occur)
   :config
   (defadvice! +vertico--consult-recent-file-a (&rest _args)
@@ -131,23 +146,37 @@ orderless."
    +default/search-project-for-symbol-at-point
    +default/search-cwd +default/search-other-cwd
    +default/search-notes-for-symbol-at-point
-   consult--source-file consult--source-project-file consult--source-bookmark
+   +default/search-emacsd
+   consult--source-recent-file consult--source-project-recent-file consult--source-bookmark
    :preview-key (kbd "C-SPC"))
   (consult-customize
    consult-theme
    :preview-key (list (kbd "C-SPC") :debounce 0.5 'any))
-  (after! org
+  (when (featurep! :lang org)
     (defvar +vertico--consult-org-source
-      `(:name     "Org"
-        :narrow   ?o
-        :hidden t
-        :category buffer
-        :state    ,#'consult--buffer-state
-        :items    ,(lambda () (mapcar #'buffer-name (org-buffer-list)))))
-    (add-to-list 'consult-buffer-sources '+vertico--consult-org-source 'append))
-  (map! :map consult-crm-map
-        :desc "Select candidate" "TAB" #'+vertico/crm-select
-        :desc "Enter candidates" "RET" #'+vertico/crm-exit))
+      (list :name     "Org Buffer"
+            :category 'buffer
+            :narrow   ?o
+            :hidden   t
+            :face     'consult-buffer
+            :history  'buffer-name-history
+            :state    #'consult--buffer-state
+            :new
+            (lambda (name)
+              (with-current-buffer (get-buffer-create name)
+                (insert "#+title: " name "\n\n")
+                (org-mode)
+                (consult--buffer-action (current-buffer))))
+            :items
+            (lambda ()
+              (mapcar #'buffer-name
+                      (if (featurep 'org)
+                          (org-buffer-list)
+                        (seq-filter
+                         (lambda (x)
+                           (eq (buffer-local-value 'major-mode x) 'org-mode))
+                         (buffer-list)))))))
+    (add-to-list 'consult-buffer-sources '+vertico--consult-org-source 'append)))
 
 
 (use-package! consult-dir
@@ -155,6 +184,7 @@ orderless."
          :map vertico-map
          ("C-x C-d" . consult-dir)
          ("C-x C-j" . consult-dir-jump-file)))
+
 
 (use-package! consult-flycheck
   :when (featurep! :checkers syntax)
@@ -171,6 +201,7 @@ orderless."
         (:map minibuffer-local-map
          "C-;"               #'embark-act
          "C-c C-;"           #'embark-export
+         "C-c C-l"           #'embark-collect
          :desc "Export to writable buffer" "C-c C-e" #'+vertico/embark-export-write)
         (:leader
          :desc "Actions" "a" #'embark-act)) ; to be moved to :config default if accepted
@@ -203,11 +234,11 @@ orderless."
     ("u" doom/help-package-homepage))
   (setf (alist-get 'package embark-keymap-alist) #'+vertico/embark-doom-package-map)
   (map! (:map embark-file-map
-         :desc "Open target with sudo" "s" #'doom/sudo-find-file
+         :desc "Open target with sudo"        "s"   #'doom/sudo-find-file
          (:when (featurep! :tools magit)
           :desc "Open magit-status of target" "g"   #'+vertico/embark-magit-status)
          (:when (featurep! :ui workspaces)
-          :desc "Open in new workspace" "TAB" #'+vertico/embark-open-in-new-workspace))))
+          :desc "Open in new workspace"       "TAB" #'+vertico/embark-open-in-new-workspace))))
 
 
 (use-package! marginalia
@@ -220,7 +251,7 @@ orderless."
     (add-hook 'marginalia-mode-hook #'all-the-icons-completion-marginalia-setup))
   (advice-add #'marginalia--project-root :override #'doom-project-root)
   (pushnew! marginalia-command-categories
-            '(+default/find-file-under-here. file)
+            '(+default/find-file-under-here . file)
             '(doom/find-file-in-emacsd . project-file)
             '(doom/find-file-in-other-project . project-file)
             '(doom/find-file-in-private-config . file)
@@ -242,3 +273,10 @@ orderless."
 (use-package! wgrep
   :commands wgrep-change-to-wgrep-mode
   :config (setq wgrep-auto-save-buffer t))
+
+
+(use-package! vertico-posframe
+  :when (featurep! +childframe)
+  :hook (vertico-mode . vertico-posframe-mode)
+  :config
+  (add-hook 'doom-after-reload-hook #'posframe-delete-all))

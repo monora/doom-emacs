@@ -277,14 +277,27 @@ Also adds support for a `:sync' parameter to override `:async'."
             (funcall orig-fn arg info params)
           (funcall fn orig-fn arg info params)))))
 
+  ;; HACK Fix #6061. Seems `org-babel-do-in-edit-buffer' has the side effect of
+  ;;   deleting side windows. Should be reported upstream! This advice
+  ;;   suppresses this behavior wherever it is known to be used.
+  (defadvice! +org-fix-window-excursions-a (fn &rest args)
+    "Suppress changes to the window config anywhere
+`org-babel-do-in-edit-buffer' is used."
+    :around #'evil-org-open-below
+    :around #'evil-org-open-above
+    :around #'org-indent-region
+    :around #'org-indent-line
+    (save-window-excursion (apply fn args)))
+
   (defadvice! +org-fix-newline-and-indent-in-src-blocks-a (&optional indent _arg _interactive)
     "Mimic `newline-and-indent' in src blocks w/ lang-appropriate indentation."
     :after #'org-return
     (when (and indent
                org-src-tab-acts-natively
                (org-in-src-block-p t))
-      (org-babel-do-in-edit-buffer
-       (call-interactively #'indent-for-tab-command))))
+      (save-window-excursion
+        (org-babel-do-in-edit-buffer
+         (call-interactively #'indent-for-tab-command)))))
 
   (defadvice! +org-inhibit-mode-hooks-a (fn datum name &optional initialize &rest args)
     "Prevent potentially expensive mode hooks in `org-babel-do-in-edit-buffer' ops."
@@ -305,7 +318,19 @@ Also adds support for a `:sync' parameter to override `:async'."
 
   ;; Refresh inline images after executing src blocks (useful for plantuml or
   ;; ipython, where the result could be an image)
-  (add-hook 'org-babel-after-execute-hook #'org-redisplay-inline-images)
+  (add-hook! 'org-babel-after-execute-hook
+    (defun +org-redisplay-inline-images-in-babel-result-h ()
+      (unless (or
+               ;; ...but not while Emacs is exporting an org buffer (where
+               ;; `org-display-inline-images' can be awfully slow).
+               (bound-and-true-p org-export-current-backend)
+               ;; ...and not while tangling org buffers (which happens in a temp
+               ;; buffer where `buffer-file-name' is nil).
+               (string-match-p "^ \\*temp" (buffer-name)))
+        (save-excursion
+          (when-let ((beg (org-babel-where-is-src-block-result))
+                     (end (progn (goto-char beg) (forward-line) (org-babel-result-end))))
+            (org-display-inline-images nil nil (min beg end) (max beg end)))))))
 
   (after! python
     (unless org-babel-python-command
@@ -526,6 +551,29 @@ relative to `org-directory', unless it is an absolute path."
   (+org-define-basic-link "doom-docs" 'doom-docs-dir)
   (+org-define-basic-link "doom-modules" 'doom-modules-dir)
 
+  ;; TODO PR this upstream
+  (defadvice! +org--follow-search-string-a (fn link arg)
+    "Support ::SEARCH syntax for id: links."
+    :around #'org-id-open
+    :around #'org-roam-id-open
+    (save-match-data
+      (cl-destructuring-bind (id &optional search)
+          (split-string link "::")
+        (prog1 (funcall fn id arg)
+          (cond ((null search))
+                ((string-match-p "\\`[0-9]+\\'" search)
+                 ;; Move N lines after the ID (in case it's a heading), instead
+                 ;; of the start of the buffer.
+                 (forward-line (string-to-number option)))
+                ((string-match "^/\\([^/]+\\)/$" search)
+                 (let ((match (match-string 1 search)))
+                   (save-excursion (org-link-search search))
+                   ;; `org-link-search' only reveals matches. Moving the point
+                   ;; to the first match after point is a sensible change.
+                   (when (re-search-forward match)
+                     (goto-char (match-beginning 0)))))
+                ((org-link-search search)))))))
+
   ;; Add "lookup" links for packages and keystrings; useful for Emacs
   ;; documentation -- especially Doom's!
   (org-link-set-parameters
@@ -637,23 +685,35 @@ mutating hooks on exported output, like formatters."
   ;; Open help:* links with helpful-* instead of describe-*
   (advice-add #'org-link--open-help :around #'doom-use-helpful-a)
 
-  (defadvice! +org--show-parents-a (&optional arg)
-    "Show all headlines in the buffer, like a table of contents.
-With numerical argument N, show content up to level N."
-    :override #'org-content
-    (interactive "p")
-    (org-show-all '(headings drawers))
-    (save-excursion
-      (goto-char (point-max))
-      (let ((regexp (if (and (wholenump arg) (> arg 0))
-                        (format "^\\*\\{%d,%d\\} " (1- arg) arg)
-                      "^\\*+ "))
-            (last (point)))
-        (while (re-search-backward regexp nil t)
-          (when (or (not (wholenump arg))
-                    (= (org-current-level) arg))
-            (org-flag-region (line-end-position) last t 'outline))
-          (setq last (line-end-position 0))))))
+  ;; Unlike the stock showNlevels options, these will also show the parents of
+  ;; the target level, recursively.
+  (pushnew! org-startup-options
+            '("show2levels*" org-startup-folded show2levels*)
+            '("show3levels*" org-startup-folded show3levels*)
+            '("show4levels*" org-startup-folded show4levels*)
+            '("show5levels*" org-startup-folded show5levels*))
+
+  (defadvice! +org--more-startup-folded-options-a ()
+    "Adds support for 'showNlevels*' startup options.
+Unlike showNlevels, this will also unfold parent trees."
+    :before #'org-set-startup-visibility
+    (when-let (n (pcase org-startup-folded
+                   (`show2levels* 2)
+                   (`show3levels* 3)
+                   (`show4levels* 4)
+                   (`show5levels* 5)))
+      (org-show-all '(headings drawers))
+      (save-excursion
+        (goto-char (point-max))
+        (let ((regexp (if (and (wholenump n) (> n 0))
+                          (format "^\\*\\{%d,%d\\} " (1- n) n)
+                        "^\\*+ "))
+              (last (point)))
+          (while (re-search-backward regexp nil t)
+            (when (or (not (wholenump n))
+                      (= (org-current-level) n))
+              (org-flag-region (line-end-position) last t 'outline))
+            (setq last (line-end-position 0)))))))
 
   ;; Some uses of `org-fix-tags-on-the-fly' occur without a check on
   ;; `org-auto-align-tags', such as in `org-self-insert-command' and
@@ -822,6 +882,8 @@ between the two."
         "h" #'org-toggle-heading
         "i" #'org-toggle-item
         "I" #'org-id-get-create
+        "k" #'org-babel-remove-result
+        "K" #'+org/remove-result-blocks
         "n" #'org-store-link
         "o" #'org-set-property
         "q" #'org-set-tags-command
@@ -982,9 +1044,9 @@ between the two."
        :slot -1 :vslot -1 :size #'+popup-shrink-to-fit :ttl 0)
       ("^\\*Org \\(?:Select\\|Attach\\)" :slot -1 :vslot -2 :ttl 0 :size 0.25)
       ("^\\*Org Agenda"     :ignore t)
-      ("^\\*Org Src"        :size 0.4  :quit nil :select t :autosave t :modeline t :ttl nil)
+      ("^\\*Org Src"        :size 0.42  :quit nil :select t :autosave t :modeline t :ttl nil)
       ("^\\*Org-Babel")
-      ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.25 :quit nil :select t :autosave ignore))))
+      ("^\\*Capture\\*$\\|CAPTURE-.*$" :size 0.42 :quit nil :select t :autosave ignore))))
 
 
 (defun +org-init-protocol-lazy-loader-h ()
@@ -1160,8 +1222,8 @@ compelling reason, so..."
             ;; more intuitive RET keybinds
             :n [return]   #'+org/dwim-at-point
             :n "RET"      #'+org/dwim-at-point
-            :i [return]   (cmd! (org-return electric-indent-mode))
-            :i "RET"      (cmd! (org-return electric-indent-mode))
+            :i [return]   #'+org/return
+            :i "RET"      #'+org/return
             :i [S-return] #'+org/shift-return
             :i "S-RET"    #'+org/shift-return
             ;; more vim-esque org motion keys (not covered by evil-org-mode)
@@ -1224,6 +1286,7 @@ compelling reason, so..."
 
   (setq org-publish-timestamp-directory (concat doom-cache-dir "org-timestamps/")
         org-preview-latex-image-directory (concat doom-cache-dir "org-latex/")
+        org-persist-directory (concat doom-cache-dir "org-persist/")
         ;; Recognize a), A), a., A., etc -- must be set before org is loaded.
         org-list-allow-alphabetical t)
 
@@ -1320,6 +1383,9 @@ compelling reason, so..."
     (file-writable-p org-id-locations-file))
 
   (add-hook 'org-open-at-point-functions #'doom-set-jump-h)
+  ;; HACK For functions that dodge `org-open-at-point-functions', like
+  ;;   `org-id-open', `org-goto', or roam: links.
+  (advice-add #'org-mark-ring-push :around #'doom-set-jump-a)
 
   ;; Add the ability to play gifs, at point or throughout the buffer. However,
   ;; 'playgifs' is stupid slow and there's not much I can do to fix it; use at

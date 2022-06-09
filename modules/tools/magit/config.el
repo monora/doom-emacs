@@ -4,7 +4,7 @@
   "What direction to open new windows from the status buffer.
 For example, diffs and log buffers. Accepts `left', `right', `up', and `down'.")
 
-(defvar +magit-fringe-size 14
+(defvar +magit-fringe-size '(13 . 1)
   "Size of the fringe in magit-mode buffers.
 
 Can be an integer or a cons cell whose CAR and CDR are integer widths for the
@@ -114,12 +114,12 @@ Only has an effect in GUI Emacs.")
   ;; Close transient with ESC
   (define-key transient-map [escape] #'transient-quit-one)
 
-  (add-hook! 'magit-mode-hook
+  (add-hook! 'magit-section-mode-hook
     (add-hook! 'window-configuration-change-hook :local
       (defun +magit-enlargen-fringe-h ()
         "Make fringe larger in magit."
         (and (display-graphic-p)
-             (derived-mode-p 'magit-mode)
+             (derived-mode-p 'magit-section-mode)
              +magit-fringe-size
              (let ((left  (or (car-safe +magit-fringe-size) +magit-fringe-size))
                    (right (or (cdr-safe +magit-fringe-size) +magit-fringe-size)))
@@ -201,7 +201,8 @@ ensure it is built when we actually use Forge."
           (evil-collection-define-key state 'code-review-mode-map evil-binding fn))))
     (evil-set-initial-state 'code-review-mode evil-default-state))
   (setq code-review-db-database-file (concat doom-etc-dir "code-review/code-review-db-file.sqlite")
-        code-review-log-file (concat doom-etc-dir "code-review/code-review-error.log"))
+        code-review-log-file (concat doom-etc-dir "code-review/code-review-error.log")
+        code-review-download-dir (concat doom-etc-dir "code-review/"))
   :config
   (transient-append-suffix 'magit-merge "i"
     '("y" "Review pull request" +magit/start-code-review))
@@ -236,7 +237,10 @@ ensure it is built when we actually use Forge."
   (evil-define-key* 'normal magit-status-mode-map [escape] nil)
 
   (after! code-review
-    (undefine-key! code-review-mode-map "M-1" "M-2" "M-3" "M-4" "1" "2" "3" "4" "0"))
+    (undefine-key! code-review-mode-map "M-1" "M-2" "M-3" "M-4" "1" "2" "3" "4" "0")
+    (map! :map code-review-mode-map
+          :n "r" #'code-review-transient-api
+          :n "RET" #'code-review-comment-add-or-edit))
 
   ;; Some extra vim-isms I thought were missing from upstream
   (evil-define-key* '(normal visual) magit-mode-map

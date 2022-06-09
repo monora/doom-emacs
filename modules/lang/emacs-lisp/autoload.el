@@ -11,11 +11,11 @@ to a pop up buffer."
    (string-trim-right
     (condition-case-unless-debug e
         (let ((result
-               (let ((buffer-file-name
-                      (buffer-file-name (buffer-base-buffer)))
-                     (doom--current-module
-                      (ignore-errors (doom-module-from-path buffer-file-name)))
-                     (debug-on-error t))
+               (let* ((buffer-file-name (buffer-file-name (buffer-base-buffer)))
+                      (buffer-file-truename (file-truename buffer-file-name))
+                      (doom--current-module
+                       (ignore-errors (doom-module-from-path buffer-file-name)))
+                      (debug-on-error t))
                  (eval (read (format "(progn %s)"
                                      (buffer-substring-no-properties beg end)))
                        lexical-binding))))
@@ -225,7 +225,7 @@ https://emacs.stackexchange.com/questions/10230/how-to-indent-keywords-aligned"
         `(("Section" "^[ \t]*;;;;*[ \t]+\\([^\n]+\\)" 1)
           ("Evil commands" "^\\s-*(evil-define-\\(?:command\\|operator\\|motion\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
           ("Unit tests" "^\\s-*(\\(?:ert-deftest\\|describe\\) +\"\\([^\")]+\\)\"" 1)
-          ("Package" "^\\s-*(\\(?:;;;###package\\|package!\\|use-package!?\\|after!\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
+          ("Package" "^\\s-*\\(?:;;;###package\\|(\\(?:package!\\|use-package!?\\|after!\\)\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
           ("Major modes" "^\\s-*(define-derived-mode +\\([^ ()\n]+\\)" 1)
           ("Minor modes" "^\\s-*(define-\\(?:global\\(?:ized\\)?-minor\\|generic\\|minor\\)-mode +\\([^ ()\n]+\\)" 1)
           ("Modelines" "^\\s-*(def-modeline! +\\([^ ()\n]+\\)" 1)
